@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">CompassProject</string>
+    <string name="distance_from_dest">Distance from the destination:</string>
+    <string name="set_destination">SET DESTINATION</string>
+    <string name="stop_tracking">Stop tracking</string>
+    <string name="enter_destination_coordinates">Enter destination coordinates:</string>
+    <string name="meters">x m</string>
+    <string name="you_set">You set:</string>
+    <string name="latitude">latitude</string>
+    <string name="longitude">longitude</string>
 </resources>
