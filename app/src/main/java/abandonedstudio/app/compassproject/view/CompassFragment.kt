@@ -6,6 +6,7 @@ import abandonedstudio.app.compassproject.util.Animations
 import abandonedstudio.app.compassproject.util.Constants.FINE_LOCATION_RQ
 import abandonedstudio.app.compassproject.util.DestinationDialogFragment
 import abandonedstudio.app.compassproject.util.PermissionsManager
+import abandonedstudio.app.compassproject.util.Tracking
 import abandonedstudio.app.compassproject.viewmodel.CompassViewModel
 import android.Manifest
 import android.annotation.SuppressLint
@@ -15,24 +16,19 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Looper
-import android.util.Log
-import android.view.LayoutInflater
-import android.view.View
-import android.view.ViewGroup
+import android.view.*
 import android.widget.Toast
 import androidx.annotation.RequiresApi
-import androidx.core.location.LocationManagerCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import com.google.android.gms.location.*
-import com.google.android.gms.location.LocationRequest.PRIORITY_HIGH_ACCURACY
-import com.google.android.gms.location.LocationRequest.create
 import com.google.android.material.snackbar.Snackbar
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
+import kotlin.math.absoluteValue
 
 @AndroidEntryPoint
 class CompassFragment: Fragment(), DestinationDialogFragment.OnSetDestinationListener, SensorEventListener {
@@ -42,12 +38,13 @@ class CompassFragment: Fragment(), DestinationDialogFragment.OnSetDestinationLis
     private var _binding: CompassFragmentBinding? = null
     private val binding get() = _binding!!
 
-    private lateinit var destinationDialog: DestinationDialogFragment
-
-    private var isTrackingNow = false
+    @Inject
+    lateinit var destinationDialog: DestinationDialogFragment
 
     private var currentCompassDegree = 0f
-    private lateinit var sensorManager:SensorManager
+    private var currentIndicatorDegree = 0f
+    @Inject
+    lateinit var sensorManager: SensorManager
 
     private val rotationMatrix = FloatArray(9)
     private val orientationAngles = FloatArray(3)
@@ -55,8 +52,10 @@ class CompassFragment: Fragment(), DestinationDialogFragment.OnSetDestinationLis
     private val accelerometerReading = FloatArray(3)
     private val magnetometerReading = FloatArray(3)
 
-    private lateinit var fusedLocationClient: FusedLocationProviderClient
-    private lateinit var locationRequest: LocationRequest
+    @Inject
+    lateinit var fusedLocationClient: FusedLocationProviderClient
+    @Inject
+    lateinit var locationRequest: LocationRequest
     private lateinit var locationCallback: LocationCallback
 
     override fun onCreateView(
@@ -71,17 +70,29 @@ class CompassFragment: Fragment(), DestinationDialogFragment.OnSetDestinationLis
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(requireContext())
-        sensorManager = requireActivity().getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        checkOrientationAndSetCompass()
 
-        destinationDialog = DestinationDialogFragment()
         destinationDialog.setOnSetDestinationListener(this)
 
+        if (viewModel.isTracking){
+            getLocationUpdates()
+        }
+
         binding.setDestinationButton.setOnClickListener {
-            if (checkForLocationAccess()){
-                if(isLocationEnabled(requireContext())){
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if (PermissionsManager.hasLocationPermission(requireContext())) {
+                    if (Tracking.isLocationEnabled(requireContext())) {
+                        toggleTracking()
+                    } else {
+                        Snackbar.make(requireView(), "Turn on location", Snackbar.LENGTH_SHORT).show()
+                    }
+                } else {
+                    showLocationDialog()
+                }
+            } else {
+                if (Tracking.isLocationEnabled(requireContext())) {
                     toggleTracking()
-                } else{
+                } else {
                     Snackbar.make(requireView(), "Turn on location", Snackbar.LENGTH_SHORT).show()
                 }
             }
@@ -93,6 +104,7 @@ class CompassFragment: Fragment(), DestinationDialogFragment.OnSetDestinationLis
     override fun onResume() {
         super.onResume()
 
+//        tracking current north direction by these sensors
         sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.also { accelerometer ->
             sensorManager.registerListener(
                     this,
@@ -101,7 +113,6 @@ class CompassFragment: Fragment(), DestinationDialogFragment.OnSetDestinationLis
                     SensorManager.SENSOR_DELAY_UI
             )
         }
-
 
         sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD).also {
             sensorManager.registerListener(
@@ -114,13 +125,18 @@ class CompassFragment: Fragment(), DestinationDialogFragment.OnSetDestinationLis
 
         if (viewModel.isTracking){
             startUpdatingLocation()
+            binding.setDestinationButton.text = getString(R.string.stop_tracking)
+            setLatLngInfo()
         }
     }
 
     override fun onPause() {
         super.onPause()
+//        stop tracking users location and north direction
         sensorManager.unregisterListener(this)
-        stopUpdatingLocation()
+        if(viewModel.isTracking){
+            stopUpdatingLocation()
+        }
     }
 
     override fun onDestroyView() {
@@ -128,26 +144,48 @@ class CompassFragment: Fragment(), DestinationDialogFragment.OnSetDestinationLis
         _binding = null
     }
 
+    @SuppressLint("SetTextI18n")
     private fun subscribeToObservers(){
         viewModel.distanceFromDestination.observe(viewLifecycleOwner, {
             binding.distanceTextView.text = "$it m"
         })
-
-        viewModel.bearingToDest.observe(viewLifecycleOwner, {
-//            TODO: animate compass idle
-        })
     }
 
+//    checking orientation and pre-setting compass in correct orientation (north pointing to phone top)
+    private fun checkOrientationAndSetCompass(){
+    val orientation: Int?
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            orientation = requireContext().display?.rotation
+        } else {
+//            to detect orientation on api < 30
+            @Suppress("DEPRECATION")
+            orientation = (requireContext().getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay.orientation
+        }
+        if (orientation == Surface.ROTATION_270 || orientation == Surface.ROTATION_180){
+            binding.compassImageView.rotation = 90f
+            binding.directionIndicatorConstraintLayout.rotation = 180f
+        }
+    }
+
+//    start/stop tracking and update ui
     private fun toggleTracking(){
-        if (isTrackingNow){
+        if (viewModel.isTracking){
             stopUpdatingLocation()
             viewModel.isTracking = false
             binding.setDestinationButton.text = getString(R.string.set_destination)
-            isTrackingNow = !isTrackingNow
+            viewModel.bearingToDest.postValue(0f)
+            viewModel.distanceFromDestination.postValue(0)
+            binding.distanceTextView.text = "x m"
+            binding.latTextView.text = getString(R.string.latitude)
+            binding.lngTextView.text = getString(R.string.longitude)
         } else{
-            isTrackingNow = !isTrackingNow
             showDestinationDialog()
         }
+    }
+
+    private fun setLatLngInfo(){
+        binding.latTextView.text = viewModel.getDestinationLatitude().toString()
+        binding.lngTextView.text = viewModel.getDestinationLongitude().toString()
     }
 
     private fun showDestinationDialog(){
@@ -155,31 +193,15 @@ class CompassFragment: Fragment(), DestinationDialogFragment.OnSetDestinationLis
     }
 
 //    already checked for nullability in dialog (DestinationDialogFragment)
-    override fun onCoordinatesEntered(latitude: Float, longitude: Float) {
+    override fun onCoordinatesEntered(latitude: Double, longitude: Double) {
+        Toast.makeText(requireContext(), "Destination set", Toast.LENGTH_SHORT).show()
         binding.setDestinationButton.text = getString(R.string.stop_tracking)
         viewModel.setDestination(latitude, longitude)
-        Log.d("lista", "ui")
-        binding.latTextView.text = viewModel.getDestinationLatitude().toString()
-        binding.lngTextView.text = viewModel.getDestinationLongitude().toString()
+        setLatLngInfo()
         getLocationUpdates()
         startUpdatingLocation()
     }
 
-//    asking for location access
-    private fun checkForLocationAccess(): Boolean{
-        if (PermissionsManager.checkLocationPermissions(requireContext())){
-            return true
-        } else {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                when{
-                    shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION) -> showLocationDialog()
-
-                    else -> activity?.requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), FINE_LOCATION_RQ)
-                }
-            }
-        }
-        return false
-    }
 
     @RequiresApi(Build.VERSION_CODES.M)
     fun showLocationDialog() {
@@ -194,8 +216,14 @@ class CompassFragment: Fragment(), DestinationDialogFragment.OnSetDestinationLis
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        if (!PermissionsManager.checkLocationPermissions(requireContext())){
-            Toast.makeText(requireContext(), "Cannot access location", Toast.LENGTH_SHORT).show()
+        if (PermissionsManager.hasLocationPermission(requireContext())){
+            Toast.makeText(requireContext(), "Permission granted", Toast.LENGTH_SHORT).show()
+        } else if (shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION)){
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                showLocationDialog()
+            }
+        } else {
+            Toast.makeText(requireContext(), "You have to enable location permission in settings", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -211,30 +239,24 @@ class CompassFragment: Fragment(), DestinationDialogFragment.OnSetDestinationLis
         SensorManager.getRotationMatrix(rotationMatrix, null, accelerometerReading, magnetometerReading)
         SensorManager.getOrientation(rotationMatrix, orientationAngles)
         val azimuthDeg = Math.toDegrees(orientationAngles[0].toDouble()).toFloat()
+        val indicatorDeg = viewModel.bearingToDest.value ?: 0f
 
-        binding.compassImageView.startAnimation(
-                Animations.animateCompassRotation(currentCompassDegree, -azimuthDeg)
-        )
-        currentCompassDegree = -azimuthDeg
-    }
-
-    override fun onAccuracyChanged(p0: Sensor?, p1: Int) {
-//        no-op
-    }
-
-//    check if location is turned on
-    private fun isLocationEnabled(context: Context): Boolean{
-        val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        return LocationManagerCompat.isLocationEnabled(locationManager)
-    }
-
-    private fun getLocationUpdates() {
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(requireContext())
-        locationRequest = create().apply {
-            interval = 5000
-            fastestInterval = 4000
-            priority = PRIORITY_HIGH_ACCURACY
+        if ((azimuthDeg-currentCompassDegree).absoluteValue > 10 || (indicatorDeg-currentIndicatorDegree).absoluteValue > 10){
+            binding.compassImageView.startAnimation(
+                    Animations.animateCompassRotation(currentCompassDegree, -azimuthDeg)
+            )
+            binding.directionIndicatorConstraintLayout.startAnimation(
+                    Animations.animateCompassRotation(currentIndicatorDegree, -azimuthDeg + indicatorDeg)
+            )
+            currentCompassDegree = -azimuthDeg
+            currentIndicatorDegree = -azimuthDeg + indicatorDeg
         }
+    }
+
+    override fun onAccuracyChanged(p0: Sensor?, p1: Int) { /* no-op */ }
+
+//    tracking current user's location and updating direction and distance to destination
+    private fun getLocationUpdates() {
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(locationResult: LocationResult?) {
                 locationResult ?: return
@@ -255,11 +277,12 @@ class CompassFragment: Fragment(), DestinationDialogFragment.OnSetDestinationLis
                 locationCallback,
                 Looper.getMainLooper()
         )
+        binding.directionIndicatorConstraintLayout.visibility = View.VISIBLE
     }
 
     private fun stopUpdatingLocation() {
         fusedLocationClient.removeLocationUpdates(locationCallback)
+        binding.directionIndicatorConstraintLayout.visibility = View.INVISIBLE
     }
-
 
 }

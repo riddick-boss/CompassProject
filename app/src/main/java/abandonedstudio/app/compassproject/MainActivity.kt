@@ -3,7 +3,6 @@ package abandonedstudio.app.compassproject
 import abandonedstudio.app.compassproject.databinding.ActivityMainBinding
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
-import androidx.navigation.fragment.NavHostFragment
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint

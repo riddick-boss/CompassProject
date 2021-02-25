@@ -13,7 +13,7 @@ object Animations {
             Animation.RELATIVE_TO_SELF,
             0.5f
     ).also {
-        it.duration = 400
+        it.duration = 1500
         it.fillAfter = true
     }
 }

@@ -9,6 +9,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.DialogFragment;
 
+import abandonedstudio.app.compassproject.R;
 import abandonedstudio.app.compassproject.databinding.DestinationDialogBinding;
 
 public class DestinationDialogFragment extends DialogFragment {
@@ -25,19 +26,19 @@ public class DestinationDialogFragment extends DialogFragment {
         builder.setView(binding.getRoot())
                 .setPositiveButton("SET", (dialogInterface, i) -> {
                     if (!binding.latitudeEditText.getText().toString().isEmpty() && !binding.longitudeEditText.getText().toString().isEmpty()){
-                        Float lat = Float.valueOf(binding.latitudeEditText.getText().toString());
-                        Float lng = Float.valueOf(binding.longitudeEditText.getText().toString());
-                        listener.onCoordinatesEntered(lat, lng);
-                        Toast.makeText(requireContext(), "Destination set", Toast.LENGTH_SHORT).show();
-//                        getActivity().requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, FINE_LOCATION_RQ);
+                        Double lat = Double.valueOf(binding.latitudeEditText.getText().toString());
+                        Double lng = Double.valueOf(binding.longitudeEditText.getText().toString());
+                        if (coordinatesCorrect(lat, lng)){
+                            listener.onCoordinatesEntered(lat, lng);
+                        } else {
+                            Toast.makeText(requireContext(), R.string.correct_coordinates, Toast.LENGTH_SHORT).show();
+                        }
                     }
                     else{
                         Toast.makeText(requireContext(), "Enter destination coordinates!", Toast.LENGTH_SHORT).show();
                     }
                 })
-                .setNegativeButton("Cancel", (dialogInterface, i) -> {
-                    dialogInterface.dismiss();
-                });
+                .setNegativeButton("Cancel", (dialogInterface, i) -> dialogInterface.dismiss());
         return builder.create();
     }
 
@@ -47,8 +48,12 @@ public class DestinationDialogFragment extends DialogFragment {
         binding = null;
     }
 
+    private Boolean coordinatesCorrect(Double latitude, Double longitude){
+        return latitude <= 90 && latitude >= -90 && longitude <= 180 && longitude >= -180;
+    }
+
     public interface OnSetDestinationListener{
-        void onCoordinatesEntered(Float latitude, Float longitude);
+        void onCoordinatesEntered(Double latitude, Double longitude);
     }
 
     public void setOnSetDestinationListener(OnSetDestinationListener listener){

@@ -8,4 +8,5 @@
     <string name="you_set">You set:</string>
     <string name="latitude">latitude</string>
     <string name="longitude">longitude</string>
+    <string name="correct_coordinates">Latitude must be between -90 and 90\nLongitude must be between -180 and 180</string>
 </resources>
