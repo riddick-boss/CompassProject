@@ -161,7 +161,7 @@ class CompassFragment: Fragment(), DestinationDialogFragment.OnSetDestinationLis
             @Suppress("DEPRECATION")
             orientation = (requireContext().getSystemService(Context.WINDOW_SERVICE) as WindowManager).defaultDisplay.orientation
         }
-        if (orientation == Surface.ROTATION_270 || orientation == Surface.ROTATION_180){
+        if (orientation == Surface.ROTATION_270){
             binding.compassImageView.rotation = 90f
             binding.directionIndicatorConstraintLayout.rotation = 180f
         }
@@ -277,12 +277,12 @@ class CompassFragment: Fragment(), DestinationDialogFragment.OnSetDestinationLis
                 locationCallback,
                 Looper.getMainLooper()
         )
-        binding.directionIndicatorConstraintLayout.visibility = View.VISIBLE
+        binding.directionIndicatorImageView.visibility = View.VISIBLE
     }
 
     private fun stopUpdatingLocation() {
         fusedLocationClient.removeLocationUpdates(locationCallback)
-        binding.directionIndicatorConstraintLayout.visibility = View.INVISIBLE
+        binding.directionIndicatorImageView.visibility = View.INVISIBLE
     }
 
 }
